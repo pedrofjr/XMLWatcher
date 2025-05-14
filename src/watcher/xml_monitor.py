@@ -27,50 +27,47 @@ class XMLFileHandler(FileSystemEventHandler):
         self._timer = None
         self._last_content = None
         self.config_file = os.path.join(os.path.dirname(__file__), "..", "gui", "config.json")
+        self._processing = False
 
-    def _read_file_with_retry(self, max_retries=3, delay=0.1):
+    def _read_file_with_retry(self, max_retries=5, initial_delay=0.05):
         """
         Tenta ler o arquivo com diferentes codificações e com retry
         
         Args:
             max_retries (int): Número máximo de tentativas
-            delay (float): Tempo de espera entre tentativas em segundos
+            initial_delay (float): Tempo inicial de espera entre tentativas em segundos
             
         Returns:
             str: Conteúdo do arquivo
         """
         encodings = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+        last_error = None
         
         for attempt in range(max_retries):
-            time.sleep(delay)  # Espera um pouco antes de tentar ler
+            # Delay exponencial entre tentativas
+            time.sleep(initial_delay * (2 ** attempt))
             
-            for encoding in encodings:
-                try:
-                    with open(self.file_path, 'r', encoding=encoding) as f:
-                        return f.read()
-                except UnicodeDecodeError:
-                    continue
-                except Exception as e:
-                    print(f"Erro ao ler arquivo com encoding {encoding}: {e}")
-                    continue
+            try:
+                # Primeiro tenta ler em modo binário para verificar se o arquivo está disponível
+                with open(self.file_path, 'rb') as f:
+                    content = f.read()
+                    
+                # Se conseguiu ler em binário, tenta os diferentes encodings
+                for encoding in encodings:
+                    try:
+                        return content.decode(encoding)
+                    except UnicodeDecodeError:
+                        continue
+                    except Exception as e:
+                        last_error = e
+                        continue
+            except Exception as e:
+                last_error = e
+                continue
             
             print(f"Tentativa {attempt + 1} de {max_retries} falhou")
         
-        raise Exception("Não foi possível ler o arquivo com nenhuma codificação")
-
-    def _process_modification(self):
-        """Processa a modificação do arquivo após o debounce"""
-        try:
-            # Tenta ler o arquivo com retry e diferentes codificações
-            current_content = self._read_file_with_retry()
-            
-            # Se o conteúdo mudou desde a última verificação
-            if current_content != self._last_content:
-                xml_data = self.parser.parse_file(self.file_path)
-                self.callback(xml_data)
-                self._last_content = current_content
-        except Exception as e:
-            print(f"Erro ao processar arquivo modificado: {e}")
+        raise Exception(f"Não foi possível ler o arquivo: {last_error}")
 
     def _should_play_sound(self) -> bool:
         """Verifica se o som deve ser reproduzido baseado na configuração"""
@@ -84,6 +81,40 @@ class XMLFileHandler(FileSystemEventHandler):
             pass
         return True
 
+    def _process_modification(self):
+        """Processa a modificação do arquivo após o debounce"""
+        if self._processing:
+            # Se já está processando, agenda nova verificação
+            self._schedule_next_check()
+            return
+
+        self._processing = True
+        try:
+            # Tenta ler o arquivo com retry e diferentes codificações
+            current_content = self._read_file_with_retry()
+            
+            # Se o conteúdo mudou desde a última verificação
+            if current_content != self._last_content:
+                self._last_content = current_content  # Atualiza antes de processar
+                xml_data = self.parser.parse_file(self.file_path)
+                self.callback(xml_data)
+        except Exception as e:
+            print(f"Erro ao processar arquivo modificado: {e}")
+            self._schedule_next_check(error_retry=True)
+        finally:
+            self._processing = False
+
+    def _schedule_next_check(self, error_retry=False):
+        """Agenda a próxima verificação"""
+        with self.lock:
+            if self._timer is not None:
+                self._timer.cancel()
+            
+            # Se foi erro, retry mais rápido
+            delay = 0.1 if error_retry else self.debounce_seconds
+            self._timer = Timer(delay, self._process_modification)
+            self._timer.start()
+
     def on_modified(self, event):
         """Chamado quando o arquivo é modificado"""
         if not event.is_directory and os.path.abspath(event.src_path) == self.file_path:
@@ -94,15 +125,9 @@ class XMLFileHandler(FileSystemEventHandler):
                     winsound.Beep(1000, 100)  # Frequência: 1000Hz, Duração: 100ms
                 except Exception:
                     pass  # Se não conseguir tocar o som, apenas ignora
-                
-            with self.lock:
-                # Cancela o timer anterior se existir
-                if self._timer is not None:
-                    self._timer.cancel()
-                
-                # Cria um novo timer
-                self._timer = Timer(self.debounce_seconds, self._process_modification)
-                self._timer.start()
+            
+            # Agenda o processamento
+            self._schedule_next_check()
 
 class XMLFileMonitor:
     def __init__(self):

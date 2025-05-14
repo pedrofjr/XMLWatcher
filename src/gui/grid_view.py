@@ -202,25 +202,42 @@ class XMLGridView(tk.Frame):
         Args:
             xml_data (List[Dict]): Lista de elementos XML
         """
-        # Limpa o grid
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        
-        # Adiciona os dados
-        for element in xml_data:
-            tag = element['tag']
-            attrs = str(element.get('attributes', ''))
-            original = element.get('initial_value', element.get('value', ''))
-            current = element.get('value', '')
-            parent_number = element.get('parent_number', '')
+        try:
+            # Pega todos os itens atuais
+            current_items = self.tree.get_children()
             
-            values = (parent_number, tag, attrs, original, current)
-            item = self.tree.insert('', 'end', values=values)
+            # Remove itens antigos de forma segura
+            if current_items:
+                try:
+                    self.tree.delete(*current_items)
+                except Exception:
+                    # Se falhar ao deletar todos de uma vez, tenta um por um
+                    for item in current_items:
+                        try:
+                            self.tree.delete(item)
+                        except Exception:
+                            continue
             
-            # Destaca alterações
-            if element.get('modified', False):
-                self.tree.item(item, tags=('changed',))
-                self.tree.tag_configure('changed', background='lightgreen')
+            # Adiciona os dados
+            for element in xml_data:
+                tag = element['tag']
+                attrs = str(element.get('attributes', ''))
+                original = element.get('initial_value', element.get('value', ''))
+                current = element.get('value', '')
+                parent_number = element.get('parent_number', '')
+                
+                try:
+                    values = (parent_number, tag, attrs, original, current)
+                    item = self.tree.insert('', 'end', values=values)
+                    
+                    # Destaca alterações
+                    if element.get('modified', False):
+                        self.tree.item(item, tags=('changed',))
+                        self.tree.tag_configure('changed', background='lightgreen')
+                except Exception as e:
+                    self.log_message(f"Erro ao inserir elemento {tag}: {str(e)}")
+        except Exception as e:
+            self.log_message(f"Erro ao atualizar grid: {str(e)}")
                 
         # Ajusta a largura da coluna Linha para ser menor
         self.tree.column('Linha', width=60, minwidth=50)
