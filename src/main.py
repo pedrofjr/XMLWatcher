@@ -3,7 +3,15 @@
 XMLWatcher - Aplicação para monitorar alterações em arquivos XML em tempo real
 """
 
+import os
+import sys
 import tkinter as tk
+
+# Adiciona o diretório src ao PYTHONPATH
+src_path = os.path.dirname(os.path.abspath(__file__))
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
 from gui.grid_view import XMLGridView
 from watcher.xml_monitor import XMLFileMonitor
 from utils.xml_parser import XMLParser
