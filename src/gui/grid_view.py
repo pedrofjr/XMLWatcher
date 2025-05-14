@@ -4,6 +4,9 @@ from tkinter.scrolledtext import ScrolledText
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import os
+import json
+import winsound
+from .settings_dialog import SettingsDialog
 
 class XMLGridView(tk.Frame):
     def __init__(self, master: tk.Tk, xml_parser: Any, xml_monitor: Any):
@@ -19,6 +22,7 @@ class XMLGridView(tk.Frame):
         self.xml_parser = xml_parser
         self.xml_monitor = xml_monitor
         self.initial_state: Dict = {}
+        self.config_file = os.path.join(os.path.dirname(__file__), "config.json")
         self.setup_gui()
         
     def setup_gui(self) -> None:
@@ -44,6 +48,23 @@ class XMLGridView(tk.Frame):
         )
         self.monitor_btn.pack(side='left', padx=5)
         
+        # Botão para redefinir estado
+        self.reset_btn = ttk.Button(
+            self.button_frame,
+            text="Redefinir Estado",
+            command=self.reset_state,
+            state='disabled'
+        )
+        self.reset_btn.pack(side='left', padx=5)
+        
+        # Botão de configurações
+        self.settings_btn = ttk.Button(
+            self.button_frame,
+            text="Configurações",
+            command=self.show_settings
+        )
+        self.settings_btn.pack(side='left', padx=5)
+        
         # Label para mostrar o arquivo selecionado
         self.file_label = ttk.Label(
             self.button_frame,
@@ -57,7 +78,7 @@ class XMLGridView(tk.Frame):
         self.grid_frame.pack(expand=True, fill='both', padx=5, pady=5)
         
         # Treeview para mostrar os dados XML
-        columns = ('Tag', 'Atributos', 'Valor Original', 'Valor Atual')
+        columns = ('Linha', 'Tag', 'Atributos', 'Valor Original', 'Valor Atual')
         self.tree = ttk.Treeview(
             self.grid_frame,
             columns=columns,
@@ -67,6 +88,7 @@ class XMLGridView(tk.Frame):
         
         # Configura as colunas
         column_widths = {
+            'Linha': 60,
             'Tag': 150,
             'Atributos': 200,
             'Valor Original': 200,
@@ -120,6 +142,23 @@ class XMLGridView(tk.Frame):
             fieldbackground="lightgreen"
         )
     
+    def show_settings(self) -> None:
+        """Mostra a janela de configurações"""
+        SettingsDialog(self)
+
+    def reset_state(self) -> None:
+        """Redefine o estado atual como o estado inicial"""
+        if self.xml_monitor.current_file:
+            try:
+                # Recarrega o XML atual como estado inicial
+                self.xml_parser.initial_state = None
+                xml_data = self.xml_parser.parse_file(self.xml_monitor.current_file)
+                self.initial_state = xml_data
+                self.update_grid(xml_data)
+                self.log_message("Estado redefinido com sucesso")
+            except Exception as e:
+                self.log_message(f"Erro ao redefinir estado: {str(e)}")
+    
     def select_file(self) -> None:
         """Abre diálogo para selecionar arquivo XML"""
         filename = filedialog.askopenfilename(
@@ -132,10 +171,12 @@ class XMLGridView(tk.Frame):
         
         if filename:
             try:
+                self.xml_parser.initial_state = None  # Reseta o estado inicial
                 self.load_xml(filename)
                 self.start_monitoring(filename)
                 self.file_label.config(text=filename)
                 self.monitor_btn.config(state='normal')
+                self.reset_btn.config(state='normal')
             except Exception as e:
                 self.log_message(f"Erro ao abrir arquivo: {str(e)}")
     
@@ -168,17 +209,21 @@ class XMLGridView(tk.Frame):
         # Adiciona os dados
         for element in xml_data:
             tag = element['tag']
-            attrs = str(element.get('attributes', {}))
+            attrs = str(element.get('attributes', ''))
             original = element.get('initial_value', element.get('value', ''))
             current = element.get('value', '')
+            parent_number = element.get('parent_number', '')
             
-            values = (tag, attrs, original, current)
+            values = (parent_number, tag, attrs, original, current)
             item = self.tree.insert('', 'end', values=values)
             
             # Destaca alterações
             if element.get('modified', False):
                 self.tree.item(item, tags=('changed',))
                 self.tree.tag_configure('changed', background='lightgreen')
+                
+        # Ajusta a largura da coluna Linha para ser menor
+        self.tree.column('Linha', width=60, minwidth=50)
     
     def start_monitoring(self, filename: str) -> None:
         """
@@ -207,6 +252,17 @@ class XMLGridView(tk.Frame):
             if filename != "Nenhum arquivo selecionado":
                 self.start_monitoring(filename)
                 self.log_message("Monitoramento retomado")
+
+    def _should_play_sound(self) -> bool:
+        """Verifica se o som deve ser reproduzido"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    settings = json.load(f)
+                    return settings.get('sound_enabled', True)
+        except Exception:
+            pass
+        return True
     
     def on_file_changed(self, xml_data: List[Dict[str, Any]]) -> None:
         """
@@ -220,11 +276,22 @@ class XMLGridView(tk.Frame):
             self.update_grid(data)
             
             if changes:
+                # Emite som se houver alterações e estiver habilitado
+                if self._should_play_sound():
+                    winsound.Beep(1000, 100)  # Frequência: 1000Hz, Duração: 100ms
+                
                 for change in changes:
-                    message = self.xml_parser.format_change_message(change)
-                    self.log_message(message)
+                    try:
+                        message = self.xml_parser.format_change_message(change)
+                        self.log_message(message)
+                    except Exception as e:
+                        self.log_message(f"Erro ao formatar mensagem de alteração: {str(e)}")
+                        self.log_message(f"Dados da alteração: {change}")
         except Exception as e:
             self.log_message(f"Erro ao processar alterações: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                self.log_message(f"Detalhes: {traceback.format_exc()}")
     
     def log_message(self, message: str) -> None:
         """

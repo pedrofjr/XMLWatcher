@@ -5,6 +5,7 @@ import time
 import os
 from typing import Callable
 from utils.xml_parser import XMLParser
+from threading import Timer
 
 class XMLFileHandler(FileSystemEventHandler):
     def __init__(self, file_path: str, callback: Callable, parser: XMLParser, debounce_seconds: float = 0.5):
@@ -23,21 +24,64 @@ class XMLFileHandler(FileSystemEventHandler):
         self.debounce_seconds = debounce_seconds
         self.last_modified = 0
         self.lock = threading.Lock()
+        self._timer = None
+        self._last_content = None
+
+    def _read_file_with_retry(self, max_retries=3, delay=0.1):
+        """
+        Tenta ler o arquivo com diferentes codificações e com retry
+        
+        Args:
+            max_retries (int): Número máximo de tentativas
+            delay (float): Tempo de espera entre tentativas em segundos
+            
+        Returns:
+            str: Conteúdo do arquivo
+        """
+        encodings = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+        
+        for attempt in range(max_retries):
+            time.sleep(delay)  # Espera um pouco antes de tentar ler
+            
+            for encoding in encodings:
+                try:
+                    with open(self.file_path, 'r', encoding=encoding) as f:
+                        return f.read()
+                except UnicodeDecodeError:
+                    continue
+                except Exception as e:
+                    print(f"Erro ao ler arquivo com encoding {encoding}: {e}")
+                    continue
+            
+            print(f"Tentativa {attempt + 1} de {max_retries} falhou")
+        
+        raise Exception("Não foi possível ler o arquivo com nenhuma codificação")
+
+    def _process_modification(self):
+        """Processa a modificação do arquivo após o debounce"""
+        try:
+            # Tenta ler o arquivo com retry e diferentes codificações
+            current_content = self._read_file_with_retry()
+            
+            # Se o conteúdo mudou desde a última verificação
+            if current_content != self._last_content:
+                xml_data = self.parser.parse_file(self.file_path)
+                self.callback(xml_data)
+                self._last_content = current_content
+        except Exception as e:
+            print(f"Erro ao processar arquivo modificado: {e}")
 
     def on_modified(self, event):
         """Chamado quando o arquivo é modificado"""
         if not event.is_directory and os.path.abspath(event.src_path) == self.file_path:
-            current_time = time.time()
-            
             with self.lock:
-                # Verifica se passou tempo suficiente desde a última modificação
-                if (current_time - self.last_modified) > self.debounce_seconds:
-                    try:
-                        xml_data = self.parser.parse_file(self.file_path)
-                        self.callback(xml_data)
-                        self.last_modified = current_time
-                    except Exception as e:
-                        print(f"Erro ao processar arquivo modificado: {e}")
+                # Cancela o timer anterior se existir
+                if self._timer is not None:
+                    self._timer.cancel()
+                
+                # Cria um novo timer
+                self._timer = Timer(self.debounce_seconds, self._process_modification)
+                self._timer.start()
 
 class XMLFileMonitor:
     def __init__(self):

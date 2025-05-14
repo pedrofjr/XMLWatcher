@@ -18,8 +18,12 @@ class XMLParser:
             List[Dict]: Lista de elementos XML com suas propriedades
         """
         try:
-            tree = etree.parse(file_path)
-            root = tree.getroot()
+            # Configura o parser para recuperar de erros e ignorar codificação
+            parser = etree.XMLParser(recover=True)
+            
+            with open(file_path, 'rb') as f:  # Abre em modo binário
+                tree = etree.parse(f, parser=parser)
+                root = tree.getroot()
             
             # Se não tiver estado inicial, salva o estado atual
             if self.initial_state is None:
@@ -72,39 +76,41 @@ class XMLParser:
             List[Dict]: Lista de elementos com suas propriedades
         """
         elements = []
+        current_parent_number = 0
         
-        def clean_tag(tag: str) -> str:
-            """Remove namespace do nome da tag"""
-            if '}' in tag:
-                return tag.split('}')[-1]
-            return tag
-        
-        for elem in root.iter():
-            # Pula o elemento raiz
-            if elem is root:
-                continue
+        # Encontra todos os elementos filhos diretos do root (produtos/itens)
+        for parent in root.findall('./*'):
+            current_parent_number += 1
             
-            # Extrai namespace se existir
-            if '}' in elem.tag:
-                ns = elem.tag[1:].split('}')[0]
-                self._namespace_map[clean_tag(elem.tag)] = ns
-            
-            # Formata atributos para exibição
-            formatted_attrs = []
-            for key, value in elem.attrib.items():
-                formatted_attrs.append(f"{clean_tag(key)}='{value}'")
-            
-            element_data = {
-                'tag': clean_tag(elem.tag),
-                'value': elem.text.strip() if elem.text else '',
-                'attributes': " ".join(formatted_attrs),
-                'xpath': root.getroottree().getpath(elem),
-                'namespace': self._namespace_map.get(clean_tag(elem.tag), '')
-            }
-            elements.append(element_data)
+            # Para cada filho do elemento pai (nome, preço, etc)
+            for child in parent:
+                # Extrai namespace se existir
+                if '}' in child.tag:
+                    ns = child.tag[1:].split('}')[0]
+                    clean_tag = child.tag.split('}')[-1]
+                    self._namespace_map[clean_tag] = ns
+                else:
+                    clean_tag = child.tag
+                
+                # Formata atributos do pai para elementos filhos
+                parent_attrs = []
+                for key, value in parent.attrib.items():
+                    if '}' in key:
+                        key = key.split('}')[-1]
+                    parent_attrs.append(f"{key}='{value}'")
+                
+                element_data = {
+                    'tag': clean_tag,
+                    'value': child.text.strip() if child.text else '',
+                    'attributes': " ".join(parent_attrs),  # Mostra os atributos do pai
+                    'xpath': root.getroottree().getpath(child),
+                    'namespace': self._namespace_map.get(clean_tag, ''),
+                    'parent_number': current_parent_number  # Número do item pai
+                }
+                elements.append(element_data)
             
         return elements
-
+        
     def _compare_states(
         self,
         initial_state: List[Dict[str, Any]],
@@ -140,39 +146,48 @@ class XMLParser:
                     elem_data['initial_value'] = initial_elem['value']
                     elem_data['modified'] = True
                     elem_data['change_type'] = 'modified'
-                    changes.append({
+                    change_info = {
                         'tag': current_elem['tag'],
                         'type': 'modified',
+                        'change_type': 'modified',
                         'old_value': initial_elem['value'],
                         'new_value': current_elem['value'],
                         'xpath': xpath,
                         'timestamp': datetime.now().strftime("%H:%M:%S")
-                    })
+                    }
+                    changes.append(change_info)
+                    elem_data.update(change_info)
                 
                 # Verifica mudanças em atributos
                 if initial_elem['attributes'] != current_elem['attributes']:
                     elem_data['initial_attributes'] = initial_elem['attributes']
                     elem_data['modified'] = True
                     elem_data['attributes_changed'] = True
-                    changes.append({
+                    change_info = {
                         'tag': current_elem['tag'],
                         'type': 'attributes_changed',
+                        'change_type': 'attributes_changed',
                         'old_attrs': initial_elem['attributes'],
                         'new_attrs': current_elem['attributes'],
                         'xpath': xpath,
                         'timestamp': datetime.now().strftime("%H:%M:%S")
-                    })
+                    }
+                    changes.append(change_info)
+                    elem_data.update(change_info)
             else:
                 # Elemento novo
                 elem_data['modified'] = True
                 elem_data['change_type'] = 'added'
-                changes.append({
+                change_info = {
                     'tag': current_elem['tag'],
                     'type': 'added',
+                    'change_type': 'added',
                     'value': current_elem['value'],
                     'xpath': xpath,
                     'timestamp': datetime.now().strftime("%H:%M:%S")
-                })
+                }
+                changes.append(change_info)
+                elem_data.update(change_info)
             
             result.append(elem_data)
         
@@ -183,13 +198,15 @@ class XMLParser:
                 elem_data = initial_elem.copy()
                 elem_data['modified'] = True
                 elem_data['change_type'] = 'removed'
-                changes.append({
+                change_info = {
                     'tag': initial_elem['tag'],
                     'type': 'removed',
                     'value': initial_elem['value'],
                     'xpath': xpath,
                     'timestamp': datetime.now().strftime("%H:%M:%S")
-                })
+                }
+                changes.append(change_info)
+                elem_data.update(change_info)  # Garante que o elemento tem todas as informações necessárias
                 result.append(elem_data)
                 
         return result
@@ -205,7 +222,7 @@ class XMLParser:
             str: Mensagem formatada
         """
         tag = change['tag']
-        change_type = change['type']
+        change_type = change.get('change_type') or change.get('type')
         timestamp = change.get('timestamp', datetime.now().strftime("%H:%M:%S"))
         
         if change_type == 'modified':
