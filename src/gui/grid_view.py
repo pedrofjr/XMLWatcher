@@ -78,12 +78,12 @@ class XMLGridView(tk.Frame):
         self.grid_frame.pack(expand=True, fill='both', padx=5, pady=5)
         
         # Treeview para mostrar os dados XML
-        columns = ('Linha', 'Tag', 'Atributos', 'Valor Original', 'Valor Atual')
+        columns = ('Linha', 'Tag', 'Atributos', 'Valor Original', 'Valor Atual', 'xpath')
         self.tree = ttk.Treeview(
             self.grid_frame,
             columns=columns,
             show='headings',
-            selectmode='browse'
+            selectmode='none'  # Desabilita a seleção
         )
         
         # Configura as colunas
@@ -92,12 +92,17 @@ class XMLGridView(tk.Frame):
             'Tag': 150,
             'Atributos': 200,
             'Valor Original': 200,
-            'Valor Atual': 200
+            'Valor Atual': 200,
+            'xpath': 0  # Coluna oculta
         }
         
         for col, width in column_widths.items():
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=width, minwidth=100)
+            # Configuração especial para a coluna xpath
+            if col == 'xpath':
+                self.tree.column(col, width=0, minwidth=0, stretch=False)
+            else:
+                self.tree.column(col, width=width, minwidth=100)
         
         # Configura scrollbars
         vsb = ttk.Scrollbar(
@@ -134,13 +139,8 @@ class XMLGridView(tk.Frame):
         )
         self.log_area.pack(fill='x', padx=5, pady=5)
         
-        # Configura estilo para linhas alteradas
-        style = ttk.Style()
-        style.configure(
-            "Changed.Treeview",
-            background="lightgreen",
-            fieldbackground="lightgreen"
-        )
+        # Configura o estilo para itens alterados
+        self.tree.tag_configure('changed', background='lightgreen')
     
     def show_settings(self) -> None:
         """Mostra a janela de configurações"""
@@ -203,39 +203,63 @@ class XMLGridView(tk.Frame):
             xml_data (List[Dict]): Lista de elementos XML
         """
         try:
-            # Pega todos os itens atuais
-            current_items = self.tree.get_children()
-            
-            # Remove itens antigos de forma segura
-            if current_items:
+            # Mapeia os itens atuais por xpath
+            current_items = {}
+            modified_items = []
+            for item in self.tree.get_children():
                 try:
-                    self.tree.delete(*current_items)
+                    values = self.tree.item(item)['values']
+                    if len(values) >= 5:  # Garante que tem todos os valores necessários
+                        xpath = values[5] if len(values) > 5 else None  # xpath é a sexta coluna (invisível)
+                        if xpath:
+                            current_items[xpath] = item
                 except Exception:
-                    # Se falhar ao deletar todos de uma vez, tenta um por um
-                    for item in current_items:
-                        try:
-                            self.tree.delete(item)
-                        except Exception:
-                            continue
-            
-            # Adiciona os dados
+                    continue
+
+            # Atualiza ou insere itens
+            last_modified_item = None
             for element in xml_data:
-                tag = element['tag']
-                attrs = str(element.get('attributes', ''))
-                original = element.get('initial_value', element.get('value', ''))
-                current = element.get('value', '')
-                parent_number = element.get('parent_number', '')
-                
                 try:
-                    values = (parent_number, tag, attrs, original, current)
-                    item = self.tree.insert('', 'end', values=values)
+                    tag = element['tag']
+                    attrs = str(element.get('attributes', ''))
+                    original = element.get('initial_value', element.get('value', ''))
+                    current = element.get('value', '')
+                    parent_number = element.get('parent_number', '')
+                    xpath = element.get('xpath', '')
                     
-                    # Destaca alterações
-                    if element.get('modified', False):
-                        self.tree.item(item, tags=('changed',))
-                        self.tree.tag_configure('changed', background='lightgreen')
+                    values = (parent_number, tag, attrs, original, current, xpath)  # xpath como coluna oculta
+                    
+                    # Se o item já existe, atualiza
+                    if xpath in current_items:
+                        item_id = current_items[xpath]
+                        self.tree.item(item_id, values=values)
+                        if element.get('modified', False):
+                            self.tree.item(item_id, tags=('changed',))
+                            last_modified_item = item_id
+                        else:
+                            self.tree.item(item_id, tags=())
+                        del current_items[xpath]  # Remove do dict para saber quais sobraram
+                    else:
+                        # Se não existe, insere novo
+                        item_id = self.tree.insert('', 'end', values=values)
+                        if element.get('modified', False):
+                            self.tree.item(item_id, tags=('changed',))
+                            last_modified_item = item_id
+                    
                 except Exception as e:
-                    self.log_message(f"Erro ao inserir elemento {tag}: {str(e)}")
+                    self.log_message(f"Erro ao atualizar elemento {tag}: {str(e)}")
+            
+            # Remove itens que não existem mais
+            for item_id in current_items.values():
+                try:
+                    self.tree.delete(item_id)
+                except Exception:
+                    continue
+            
+            # Se houver item modificado, rola para ele
+            if last_modified_item:
+                self.tree.see(last_modified_item)  # Rola para mostrar o item
+                
         except Exception as e:
             self.log_message(f"Erro ao atualizar grid: {str(e)}")
                 
