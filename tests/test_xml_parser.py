@@ -1,7 +1,13 @@
 import unittest
 from pathlib import Path
 import tempfile
-from lxml import etree
+import sys
+import os
+
+# Adiciona o diretório raiz do projeto ao PYTHONPATH
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
 from src.utils.xml_parser import XMLParser
 
 class TestXMLParser(unittest.TestCase):
