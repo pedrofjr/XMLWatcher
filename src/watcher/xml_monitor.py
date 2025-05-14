@@ -26,6 +26,7 @@ class XMLFileHandler(FileSystemEventHandler):
         self.lock = threading.Lock()
         self._timer = None
         self._last_content = None
+        self.config_file = os.path.join(os.path.dirname(__file__), "..", "gui", "config.json")
 
     def _read_file_with_retry(self, max_retries=3, delay=0.1):
         """
@@ -71,9 +72,29 @@ class XMLFileHandler(FileSystemEventHandler):
         except Exception as e:
             print(f"Erro ao processar arquivo modificado: {e}")
 
+    def _should_play_sound(self) -> bool:
+        """Verifica se o som deve ser reproduzido baseado na configuração"""
+        try:
+            import json
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                    return config.get('sound_enabled', True)
+        except Exception:
+            pass
+        return True
+
     def on_modified(self, event):
         """Chamado quando o arquivo é modificado"""
         if not event.is_directory and os.path.abspath(event.src_path) == self.file_path:
+            # Emite o som imediatamente ao detectar alteração
+            if self._should_play_sound():
+                try:
+                    import winsound
+                    winsound.Beep(1000, 100)  # Frequência: 1000Hz, Duração: 100ms
+                except Exception:
+                    pass  # Se não conseguir tocar o som, apenas ignora
+                
             with self.lock:
                 # Cancela o timer anterior se existir
                 if self._timer is not None:

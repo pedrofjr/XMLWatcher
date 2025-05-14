@@ -276,10 +276,6 @@ class XMLGridView(tk.Frame):
             self.update_grid(data)
             
             if changes:
-                # Emite som se houver alterações e estiver habilitado
-                if self._should_play_sound():
-                    winsound.Beep(1000, 100)  # Frequência: 1000Hz, Duração: 100ms
-                
                 for change in changes:
                     try:
                         message = self.xml_parser.format_change_message(change)
