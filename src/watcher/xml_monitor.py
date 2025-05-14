@@ -2,8 +2,9 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import threading
 import time
+from datetime import datetime
 import os
-from typing import Callable
+from typing import Callable, Dict, Any
 from utils.xml_parser import XMLParser
 from threading import Timer
 
@@ -89,6 +90,7 @@ class XMLFileHandler(FileSystemEventHandler):
             return
 
         self._processing = True
+        start_time = time.time()
         try:
             # Tenta ler o arquivo com retry e diferentes codificações
             current_content = self._read_file_with_retry()
@@ -97,7 +99,13 @@ class XMLFileHandler(FileSystemEventHandler):
             if current_content != self._last_content:
                 self._last_content = current_content  # Atualiza antes de processar
                 xml_data = self.parser.parse_file(self.file_path)
-                self.callback(xml_data)
+                
+                # Adiciona o tempo inicial ao xml_data
+                processing_info = {
+                    'start_time': start_time,
+                    'detection_time': datetime.now().strftime("%H:%M:%S")
+                }
+                self.callback(xml_data, processing_info)
         except Exception as e:
             print(f"Erro ao processar arquivo modificado: {e}")
             self._schedule_next_check(error_retry=True)

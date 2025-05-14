@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 import os
 import json
 import winsound
+import time
 from .settings_dialog import SettingsDialog
 
 class XMLGridView(tk.Frame):
@@ -305,12 +306,13 @@ class XMLGridView(tk.Frame):
             pass
         return True
     
-    def on_file_changed(self, xml_data: List[Dict[str, Any]]) -> None:
+    def on_file_changed(self, xml_data: List[Dict[str, Any]], processing_info: Dict[str, Any] = None) -> None:
         """
         Callback chamado quando o arquivo é modificado
         
         Args:
             xml_data (List[Dict]): Novos dados XML
+            processing_info (Dict): Informações sobre o processamento (tempos)
         """
         try:
             data, changes = self.xml_parser.parse_file_and_get_changes(self.xml_monitor.current_file)
@@ -320,7 +322,7 @@ class XMLGridView(tk.Frame):
                 for change in changes:
                     try:
                         message = self.xml_parser.format_change_message(change)
-                        self.log_message(message)
+                        self.log_message(message, processing_info)
                     except Exception as e:
                         self.log_message(f"Erro ao formatar mensagem de alteração: {str(e)}")
                         self.log_message(f"Dados da alteração: {change}")
@@ -330,13 +332,22 @@ class XMLGridView(tk.Frame):
                 import traceback
                 self.log_message(f"Detalhes: {traceback.format_exc()}")
     
-    def log_message(self, message: str) -> None:
+    def log_message(self, message: str, processing_info: Dict[str, Any] = None) -> None:
         """
-        Adiciona mensagem ao log com timestamp
+        Adiciona mensagem ao log com timestamp e tempo de processamento
         
         Args:
             message (str): Mensagem a ser registrada
+            processing_info (Dict): Informações sobre o processamento (tempos)
         """
+        current_time = time.time()
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_area.insert('end', f"[{timestamp}] {message}\n")
+        
+        if processing_info and 'start_time' in processing_info:
+            processing_time = current_time - processing_info['start_time']
+            detection_time = processing_info.get('detection_time', timestamp)
+            self.log_area.insert('end', f"[{timestamp}] {message} (Detectado às {detection_time}, processado em {processing_time:.3f}s)\n")
+        else:
+            self.log_area.insert('end', f"[{timestamp}] {message}\n")
+        
         self.log_area.see('end')
