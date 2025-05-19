@@ -1,10 +1,4 @@
 watchdog>=3.0.0
 lxml>=4.9.3
 pytest>=7.4.0
-│       ├── __init__.py
-│       └── xml_parser.py
-├── tests
-│   ├── __init__.py
-│   └── test_xml_parser.py
-├── requirements.txt
-└── README.md
+pyinstaller>=6.13.0
