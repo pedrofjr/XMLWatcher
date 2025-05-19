@@ -4,7 +4,7 @@ from tkinter.scrolledtext import ScrolledText
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import os
-import json
+import configparser
 import winsound
 import time
 from .settings_dialog import SettingsDialog
@@ -23,7 +23,6 @@ class XMLGridView(tk.Frame):
         self.xml_parser = xml_parser
         self.xml_monitor = xml_monitor
         self.initial_state: Dict = {}
-        self.config_file = os.path.join(os.path.dirname(__file__), "config.json")
         self.setup_gui()
         
     def setup_gui(self) -> None:
@@ -142,10 +141,29 @@ class XMLGridView(tk.Frame):
         
         # Configura o estilo para itens alterados
         self.tree.tag_configure('changed', background='lightgreen')
-    
+        
     def show_settings(self) -> None:
         """Mostra a janela de configurações"""
-        SettingsDialog(self)
+        # Cria a janela de diálogo
+        dialog = SettingsDialog(self)
+        
+        # Configura o diálogo para bloquear a janela principal
+        dialog.transient(self.master)
+        dialog.grab_set()
+        
+        # Centraliza a janela
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f'400x300+{x}+{y}')
+        
+        # Foca na janela de diálogo
+        dialog.focus_force()
+        
+        # Aguarda o fechamento da janela
+        self.wait_window(dialog)
 
     def reset_state(self) -> None:
         """Redefine o estado atual como o estado inicial"""
@@ -298,14 +316,46 @@ class XMLGridView(tk.Frame):
     def _should_play_sound(self) -> bool:
         """Verifica se o som deve ser reproduzido"""
         try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r') as f:
-                    settings = json.load(f)
-                    return settings.get('sound_enabled', True)
+            settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
+            if os.path.exists(settings_file):
+                config = configparser.ConfigParser()
+                config.read(settings_file)
+                return config.getboolean('Sound', 'enabled')
+            else:
+                from .settings_dialog import DEFAULT_SETTINGS
+                return DEFAULT_SETTINGS['Sound']['enabled'].lower() == 'true'
         except Exception:
-            pass
-        return True
-    
+            return True
+
+    def _play_sound(self) -> None:
+        """Reproduz o som de notificação"""
+        if not self._should_play_sound():
+            return
+
+        try:
+            from .settings_dialog import DEFAULT_SETTINGS
+            config = configparser.ConfigParser()
+            settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
+
+            if os.path.exists(settings_file):
+                config.read(settings_file)
+            else:
+                # Se o arquivo não existe, usa os valores padrão
+                config.read_dict(DEFAULT_SETTINGS)
+
+            if config.getboolean('Sound', 'use_custom_sound'):
+                sound_file = config.get('Sound', 'custom_sound')
+                if sound_file and os.path.exists(sound_file):
+                    winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+                    return
+
+            # Som padrão caso não use som personalizado ou em caso de erro
+            frequency = config.getint('Sound', 'frequency')
+            duration = config.getint('Sound', 'duration')
+            winsound.Beep(frequency, duration)
+        except Exception:
+            # Em caso de erro, usa o beep padrão
+            winsound.Beep(1000, 100)
     def on_file_changed(self, xml_data: List[Dict[str, Any]], processing_info: Dict[str, Any] = None) -> None:
         """
         Callback chamado quando o arquivo é modificado
@@ -317,6 +367,10 @@ class XMLGridView(tk.Frame):
         try:
             data, changes = self.xml_parser.parse_file_and_get_changes(self.xml_monitor.current_file)
             self.update_grid(data)
+            
+            # Reproduz o som se houver alterações
+            if changes:
+                self._play_sound()
             
             if changes:
                 for change in changes:

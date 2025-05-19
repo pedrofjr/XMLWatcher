@@ -1,75 +1,245 @@
 import tkinter as tk
-from tkinter import ttk
-import json
+from tkinter import ttk, filedialog
 import os
+import configparser
+import winsound
+
+DEFAULT_SETTINGS = {
+    'Sound': {
+        'enabled': 'true',
+        'custom_sound': '',
+        'use_custom_sound': 'false',
+        'frequency': '1000',
+        'duration': '100'
+    }
+}
 
 class SettingsDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
+        self.parent = parent
         
         self.title("Configurações")
-        self.geometry("300x200")
+        self.geometry("400x300")
         self.resizable(False, False)
         
-        # Torna a janela modal
+        # Inicializa o ConfigParser
+        self.config = configparser.ConfigParser()
+        self.settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
+        
+        # Carrega as configurações
+        self.load_settings()
+        
+        # Cria a interface
+        self.create_widgets()
+        
+        # Configura o que acontece quando a janela é fechada
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # Centraliza a janela sobre a janela principal
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() // 2) - (400 // 2)
+        y = (self.winfo_screenheight() // 2) - (300 // 2)
+        self.geometry(f'400x300+{x}+{y}')
+        
+        # Foca na janela
+        self.focus_force()
+        
+        # Torna a janela modal e garante que fique à frente
         self.transient(parent)
         self.grab_set()
-        
-        self.config_file = os.path.join(os.path.dirname(__file__), "config.json")
-        self.settings = self.load_settings()
-        
-        self.setup_gui()
-        
-    def setup_gui(self):
+    
+    def on_close(self):
+        """Método chamado quando a janela é fechada"""
+        self.grab_release()  # Libera o foco
+        self.destroy()  # Destroi a janela
+    
+    def create_widgets(self):
         # Frame principal
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(fill='both', expand=True)
         
         # Som
-        self.sound_enabled = tk.BooleanVar(value=self.settings.get('sound_enabled', True))
-        sound_check = ttk.Checkbutton(
-            main_frame,
-            text="Emitir som ao detectar alterações",
-            variable=self.sound_enabled
-        )
-        sound_check.pack(anchor='w', pady=5)
+        sound_frame = ttk.LabelFrame(main_frame, text="Configurações de Som", padding="5")
+        sound_frame.pack(fill='x', padx=5, pady=5)
         
-        # Botões
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(side='bottom', fill='x', pady=10)
-        
-        save_btn = ttk.Button(
-            btn_frame,
-            text="Salvar",
+        # Ativar/Desativar som
+        self.sound_enabled = tk.BooleanVar(value=self.config.getboolean('Sound', 'enabled'))
+        ttk.Checkbutton(
+            sound_frame,
+            text="Ativar som ao detectar alterações",
+            variable=self.sound_enabled,
             command=self.save_settings
-        )
-        save_btn.pack(side='right', padx=5)
+        ).pack(fill='x')
         
-        cancel_btn = ttk.Button(
-            btn_frame,
-            text="Cancelar",
-            command=self.destroy
+        # Som personalizado
+        self.use_custom_sound = tk.BooleanVar(value=self.config.getboolean('Sound', 'use_custom_sound'))
+        ttk.Checkbutton(
+            sound_frame,
+            text="Usar som personalizado",
+            variable=self.use_custom_sound,
+            command=self.toggle_custom_sound
+        ).pack(fill='x')
+        
+        # Frame para arquivo de som
+        sound_file_frame = ttk.Frame(sound_frame)
+        sound_file_frame.pack(fill='x', pady=5)
+        
+        self.sound_file_entry = ttk.Entry(sound_file_frame)
+        self.sound_file_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
+        self.sound_file_entry.insert(0, self.config.get('Sound', 'custom_sound'))
+        
+        # Armazena a referência do botão para poder alterar seu estado depois
+        self.browse_btn = ttk.Button(
+            sound_file_frame,
+            text="Procurar",
+            command=self.browse_sound_file
         )
-        cancel_btn.pack(side='right', padx=5)
+        self.browse_btn.pack(side='left')
+        
+        # Frame para botões de som
+        sound_buttons_frame = ttk.Frame(sound_frame)
+        sound_buttons_frame.pack(fill='x', pady=5)
+        
+        ttk.Button(
+            sound_buttons_frame,
+            text="Testar Som",
+            command=self.test_sound
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            sound_buttons_frame,
+            text="Restaurar Som Padrão",
+            command=self.restore_default_sound
+        ).pack(side='left')
+        
+        # Frame para configurações de som padrão
+        default_sound_frame = ttk.Frame(sound_frame)
+        default_sound_frame.pack(fill='x', pady=5)
+        
+        # Frequência
+        ttk.Label(default_sound_frame, text="Frequência (Hz):").pack(side='left', padx=5)
+        self.frequency_var = tk.StringVar(value=str(self.config.getint('Sound', 'frequency')))
+        self.frequency_entry = ttk.Entry(default_sound_frame, textvariable=self.frequency_var, width=8)
+        self.frequency_entry.pack(side='left')
+        self.frequency_entry.bind('<FocusOut>', lambda e: self.save_settings())
+        
+        # Duração
+        ttk.Label(default_sound_frame, text="Duração (ms):").pack(side='left', padx=(10, 5))
+        self.duration_var = tk.StringVar(value=str(self.config.getint('Sound', 'duration')))
+        self.duration_entry = ttk.Entry(default_sound_frame, textvariable=self.duration_var, width=6)
+        self.duration_entry.pack(side='left')
+        self.duration_entry.bind('<FocusOut>', lambda e: self.save_settings())
+        
+        # Atualiza o estado inicial dos widgets
+        self.toggle_custom_sound()
+        
+    def toggle_custom_sound(self):
+        custom_sound = self.use_custom_sound.get()
+        sound_state = 'normal' if custom_sound else 'disabled'
+        default_state = 'disabled' if custom_sound else 'normal'
+        
+        # Atualiza estado dos widgets
+        self.sound_file_entry.configure(state=sound_state)
+        self.browse_btn.configure(state=sound_state)  # Desabilita o botão procurar também
+        self.frequency_entry.configure(state=default_state)
+        self.duration_entry.configure(state=default_state)
+        
+        self.save_settings()
+    
+    def browse_sound_file(self):
+        # Só permite abrir o diálogo se o som personalizado estiver ativado
+        if self.use_custom_sound.get():
+            filename = filedialog.askopenfilename(
+                title="Selecionar arquivo de som",
+                filetypes=[("Arquivos WAV", "*.wav"), ("Todos os arquivos", "*.*")]
+            )
+            if filename:
+                self.sound_file_entry.delete(0, tk.END)
+                self.sound_file_entry.insert(0, filename)
+                self.save_settings()
+    
+    def test_sound(self):
+        if not self.sound_enabled.get():
+            return
+            
+        if self.use_custom_sound.get():
+            sound_file = self.sound_file_entry.get()
+            if sound_file and os.path.exists(sound_file):
+                try:
+                    winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+                except:
+                    winsound.Beep(1000, 100)  # Som padrão em caso de erro
+        else:
+            winsound.Beep(
+                self.config.getint('Sound', 'frequency'),
+                self.config.getint('Sound', 'duration')
+            )
+    
+    def restore_default_sound(self):
+        """Restaura as configurações de som para os valores padrão"""
+        # Obtém os valores padrão da constante DEFAULT_SETTINGS
+        default_sound = DEFAULT_SETTINGS['Sound']
+        
+        # Atualiza a interface com os valores padrão
+        self.sound_enabled.set(default_sound['enabled'].lower() == 'true')
+        self.use_custom_sound.set(default_sound['use_custom_sound'].lower() == 'true')
+        
+        # Limpa e define o caminho do arquivo de som personalizado
+        self.sound_file_entry.config(state='normal')
+        self.sound_file_entry.delete(0, tk.END)
+        self.sound_file_entry.insert(0, default_sound['custom_sound'])
+        
+        # Define os valores padrão de frequência e duração
+        self.frequency_var.set(default_sound['frequency'])
+        self.duration_var.set(default_sound['duration'])
+        
+        # Atualiza o estado dos widgets
+        self.toggle_custom_sound()
+        
+        # Salva as configurações
+        self.save_settings()
         
     def load_settings(self):
-        try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r') as f:
-                    return json.load(f)
-        except Exception:
-            pass
-        return {'sound_enabled': True}
+        """Carrega as configurações, criando o arquivo se necessário"""
+        # Inicializa com valores padrão
+        for section, options in DEFAULT_SETTINGS.items():
+            if not self.config.has_section(section):
+                self.config.add_section(section)
+            for option, value in options.items():
+                if not self.config.has_option(section, option):
+                    self.config.set(section, option, value)
         
+        # Tenta carregar arquivo existente
+        if os.path.exists(self.settings_file):
+            self.config.read(self.settings_file)
+    
     def save_settings(self):
-        settings = {
-            'sound_enabled': self.sound_enabled.get()
-        }
+        """Salva as configurações atuais no arquivo"""
+        # Garante que a seção Sound existe
+        if not self.config.has_section('Sound'):
+            self.config.add_section('Sound')
         
+        # Atualiza valores no config
+        self.config.set('Sound', 'enabled', str(self.sound_enabled.get()).lower())
+        self.config.set('Sound', 'use_custom_sound', str(self.use_custom_sound.get()).lower())
+        self.config.set('Sound', 'custom_sound', self.sound_file_entry.get())
+        
+        # Atualiza frequência e duração
         try:
-            with open(self.config_file, 'w') as f:
-                json.dump(settings, f)
-        except Exception:
-            pass
+            frequency = int(self.frequency_var.get())
+            self.config.set('Sound', 'frequency', str(frequency))
+        except ValueError:
+            self.config.set('Sound', 'frequency', DEFAULT_SETTINGS['Sound']['frequency'])
+            self.frequency_var.set(DEFAULT_SETTINGS['Sound']['frequency'])
             
-        self.destroy()
+        try:
+            duration = int(self.duration_var.get())
+            self.config.set('Sound', 'duration', str(duration))
+        except ValueError:
+            self.config.set('Sound', 'duration', DEFAULT_SETTINGS['Sound']['duration'])
+            self.duration_var.set(DEFAULT_SETTINGS['Sound']['duration'])
+        
+        # Salva no arquivo
+        with open(self.settings_file, 'w') as configfile:
+            self.config.write(configfile)

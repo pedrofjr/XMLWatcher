@@ -2,15 +2,11 @@
 
 block_cipher = None
 
-added_files = [
-    ('src/gui/config.json', 'src/gui'),
-]
-
 a = Analysis(
     ['src/main.py'],
     pathex=['.', './src'],
     binaries=[],
-    datas=added_files,
+    datas=[],
     hiddenimports=[
         'lxml._elementpath',
         'lxml.etree',
