@@ -1,8 +1,9 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 import os
 import configparser
 import winsound
+import threading
 
 DEFAULT_SETTINGS = {
     'Sound': {
@@ -101,11 +102,13 @@ class SettingsDialog(tk.Toplevel):
         sound_buttons_frame = ttk.Frame(sound_frame)
         sound_buttons_frame.pack(fill='x', pady=5)
         
-        ttk.Button(
+        # Armazena a referência do botão de teste para poder atualizar seu estado
+        self.test_button = ttk.Button(
             sound_buttons_frame,
             text="Testar Som",
             command=self.test_sound
-        ).pack(side='left', padx=5)
+        )
+        self.test_button.pack(side='left', padx=5)
         
         ttk.Button(
             sound_buttons_frame,
@@ -159,22 +162,57 @@ class SettingsDialog(tk.Toplevel):
                 self.sound_file_entry.insert(0, filename)
                 self.save_settings()
     
+    def _play_sound_thread(self, sound_file=None, frequency=None, duration=None):
+        """Função executada em uma thread separada para tocar o som"""
+        try:
+            if sound_file:
+                # Usa SND_ASYNC para tocar o som em segundo plano sem bloquear
+                winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            elif frequency and duration:
+                # Para o beep, infelizmente não tem como ser assíncrono, então usamos um delay mínimo
+                winsound.Beep(frequency, min(duration, 1000))  # Limita a duração máxima do beep para 1s
+        except Exception as e:
+            # Se ocorrer algum erro, mostra uma mensagem na thread principal
+            self.after(0, lambda: messagebox.showerror("Erro", f"Erro ao reproduzir som: {str(e)}"))
+    
     def test_sound(self):
         if not self.sound_enabled.get():
             return
-            
+        
+        # Desabilita o botão temporariamente para evitar múltiplos cliques
+        test_button = self.test_button
+        original_text = test_button['text']
+        test_button.config(text="Tocando...", state='disabled')
+        
+        def reenable_button():
+            # Reabilita o botão após um pequeno delay
+            test_button.config(text=original_text, state='normal')
+        
         if self.use_custom_sound.get():
             sound_file = self.sound_file_entry.get()
             if sound_file and os.path.exists(sound_file):
-                try:
-                    winsound.PlaySound(sound_file, winsound.SND_FILENAME)
-                except:
-                    winsound.Beep(1000, 100)  # Som padrão em caso de erro
+                # Inicia uma nova thread para tocar o som
+                thread = threading.Thread(
+                    target=self._play_sound_thread,
+                    args=(sound_file,),
+                    daemon=True
+                )
+                thread.start()
+                # Agenda a reativação do botão após 100ms
+                self.after(100, reenable_button)
+            else:
+                reenable_button()
         else:
-            winsound.Beep(
-                self.config.getint('Sound', 'frequency'),
-                self.config.getint('Sound', 'duration')
+            # Para o beep, usamos uma thread para não travar a interface
+            thread = threading.Thread(
+                target=self._play_sound_thread,
+                args=(None, self.config.getint('Sound', 'frequency'), 
+                      self.config.getint('Sound', 'duration')),
+                daemon=True
             )
+            thread.start()
+            # Como o beep é rápido, podemos reativar o botão imediatamente
+            reenable_button()
     
     def restore_default_sound(self):
         """Restaura as configurações de som para os valores padrão"""
