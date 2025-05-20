@@ -33,9 +33,20 @@ class XMLGridView(tk.Frame):
             'use_custom_sound': False,
             'custom_sound': ''
         }
+        
+        # Índices para navegação entre alterações
+        self._current_change_index = -1
+        self._changed_items = []
+        
         self.load_sound_config()
         self.setup_gui()
+        self.setup_bindings()
         
+    def setup_bindings(self) -> None:
+        """Configura os atalhos de teclado"""
+        self.master.bind('<Up>', lambda e: self.navigate_changes('up'))
+        self.master.bind('<Down>', lambda e: self.navigate_changes('down'))
+
     def setup_gui(self) -> None:
         """Configura os elementos da interface gráfica"""
         # Frame superior para botões
@@ -139,16 +150,53 @@ class XMLGridView(tk.Frame):
         self.grid_frame.grid_columnconfigure(0, weight=1)
         self.grid_frame.grid_rowconfigure(0, weight=1)
         
-        # Área de log
-        self.log_frame = ttk.LabelFrame(self, text="Log de Alterações")
-        self.log_frame.pack(fill='x', padx=5, pady=5)
+        # Frame para o log e navegação
+        self.log_container = ttk.Frame(self)
+        self.log_container.pack(fill='x', padx=5, pady=5)
         
+        # Frame para o título e botões
+        self.log_header = ttk.Frame(self.log_container)
+        self.log_header.pack(fill='x', pady=(0, 5))
+        
+        # Label para o título
+        self.log_title = ttk.Label(self.log_header, text="Log de Alterações")
+        self.log_title.pack(side='left')
+        
+        # Frame para os botões de navegação
+        self.nav_frame = ttk.Frame(self.log_header)
+        self.nav_frame.pack(side='right')
+        
+        # Botão para navegar para cima
+        self.up_btn = ttk.Button(
+            self.nav_frame,
+            text="Anterior (↑)",
+            width=12,
+            command=lambda: self.navigate_changes('up'),
+            state='disabled'
+        )
+        self.up_btn.pack(side='left', padx=2)
+        
+        # Botão para navegar para baixo
+        self.down_btn = ttk.Button(
+            self.nav_frame,
+            text="Próxima (↓)",
+            width=12,
+            command=lambda: self.navigate_changes('down'),
+            state='disabled'
+        )
+        self.down_btn.pack(side='left', padx=2)
+        
+        # Frame para a área de log com borda
+        self.log_frame = ttk.Frame(self.log_container, relief='groove', borderwidth=1)
+        self.log_frame.pack(fill='x')
+        
+        # Área de log
         self.log_area = ScrolledText(
             self.log_frame,
             height=5,
             wrap=tk.WORD
         )
-        self.log_area.pack(fill='x', padx=5, pady=5)
+        self.log_area.pack(fill='x', padx=1, pady=1)
         
         # Configura o estilo para itens alterados
         self.tree.tag_configure('changed', background='lightgreen')
@@ -290,6 +338,15 @@ class XMLGridView(tk.Frame):
             if last_modified_item:
                 self.tree.see(last_modified_item)  # Rola para mostrar o item
                 
+            # Atualiza estado dos botões de navegação
+            has_changes = any(element.get('modified', False) for element in xml_data)
+            self.up_btn.configure(state='normal' if has_changes else 'disabled')
+            self.down_btn.configure(state='normal' if has_changes else 'disabled')
+            
+            # Reseta o índice de navegação quando o grid é atualizado
+            self._current_change_index = -1
+            self._changed_items = []
+            
         except Exception as e:
             self.log_message(f"Erro ao atualizar grid: {str(e)}")
                 
@@ -413,3 +470,51 @@ class XMLGridView(tk.Frame):
             self.log_area.insert('end', f"[{timestamp}] {message}\n")
         
         self.log_area.see('end')
+
+    def navigate_changes(self, direction: str) -> None:
+        """
+        Navega entre os itens alterados
+        
+        Args:
+            direction (str): Direção da navegação ('up' ou 'down')
+        """
+        # Atualiza lista de itens alterados
+        self._changed_items = [
+            item for item in self.tree.get_children()
+            if 'changed' in self.tree.item(item)['tags']
+        ]
+        
+        if not self._changed_items:
+            return
+        
+        # Ajusta o índice baseado na direção
+        if direction == 'up':
+            self._current_change_index -= 1
+            if self._current_change_index < 0:
+                self._current_change_index = len(self._changed_items) - 1
+        else:  # down
+            self._current_change_index += 1
+            if self._current_change_index >= len(self._changed_items):
+                self._current_change_index = 0
+        
+        # Seleciona e mostra o item
+        item_id = self._changed_items[self._current_change_index]
+        self.tree.see(item_id)
+        
+        # Destaca brevemente o item
+        self.flash_item(item_id)
+    
+    def flash_item(self, item_id: str) -> None:
+        """
+        Destaca visualmente um item por um breve momento
+        
+        Args:
+            item_id (str): ID do item no Treeview
+        """
+        original_bg = self.tree.tag_configure('changed')['background']
+        
+        # Muda a cor para um tom mais forte
+        self.tree.tag_configure('changed', background='#90EE90')  # Verde mais forte
+        
+        # Agenda o retorno à cor original
+        self.after(500, lambda: self.tree.tag_configure('changed', background=original_bg))
