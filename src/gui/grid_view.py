@@ -337,6 +337,7 @@ class XMLGridView(tk.Frame):
             
             # Se houver item modificado, rola para ele
             if last_modified_item:
+                self.tree.yview_moveto(0)  # Força o scroll para o topo primeiro
                 self.tree.see(last_modified_item)  # Rola para mostrar o item
                 
             # Atualiza estado dos botões de navegação
