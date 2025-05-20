@@ -39,6 +39,7 @@ pyinstaller build.spec --clean
 REM Verifica se a compilação foi bem sucedida
 if %errorlevel% neq 0 (
     echo Erro durante a compilacao!
+    call venv\Scripts\deactivate.bat
     pause
     exit /b 1
 )
@@ -46,7 +47,8 @@ if %errorlevel% neq 0 (
 echo Build concluido com sucesso!
 echo O executavel esta na pasta 'dist'
 
-REM Desativa o ambiente virtual
-deactivate
-
-pause 
+REM Desativa o ambiente virtual e mantém a janela aberta
+call venv\Scripts\deactivate.bat
+echo.
+echo Pressione qualquer tecla para fechar...
+pause > nul

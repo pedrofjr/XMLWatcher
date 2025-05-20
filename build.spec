@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 block_cipher = None
+
+# Caminho absoluto para o ícone
+icon_path = os.path.abspath(os.path.join('src', 'resources', 'icone.ico'))
 
 a = Analysis(
     ['src/main.py'],
     pathex=['.', './src'],
     binaries=[],
-    datas=[],
+    datas=[('src/resources/icone.ico', 'resources')],  # Inclui apenas o arquivo do ícone
     hiddenimports=[
         'lxml._elementpath',
         'lxml.etree',
@@ -46,5 +51,6 @@ exe = EXE(
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
-    entitlements_file=None
+    entitlements_file=None,
+    icon=icon_path  # Usa o caminho absoluto do ícone
 )

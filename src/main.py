@@ -26,6 +26,23 @@ class Application:
         self.root.title("XMLWatcher")
         self.root.geometry("800x600")
         
+        # Define o ícone da janela
+        try:
+            if getattr(sys, 'frozen', False):
+                # Se estiver rodando como executável
+                base_path = sys._MEIPASS
+            else:
+                # Se estiver rodando como script
+                base_path = os.path.dirname(__file__)
+            
+            icon_path = os.path.join(base_path, 'resources', 'icone.ico')
+            if os.path.exists(icon_path):
+                # Define o ícone tanto para a janela quanto para a classe da aplicação
+                self.root.iconbitmap(default=icon_path)
+                self.root.iconbitmap(icon_path)
+        except Exception as e:
+            print(f"Erro ao carregar ícone: {e}")
+        
         # Inicializa gerenciadores
         self.config_manager = ConfigManager(
             os.path.join(os.path.dirname(__file__), "gui", "settings.ini")
