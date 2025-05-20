@@ -9,6 +9,7 @@ import winsound
 import time
 import threading
 from .settings_dialog import SettingsDialog, DEFAULT_SETTINGS
+from .search_dialog import SearchDialog
 
 class XMLGridView(tk.Frame):
     def __init__(self, master: tk.Tk, xml_parser: Any, xml_monitor: Any):
@@ -38,6 +39,12 @@ class XMLGridView(tk.Frame):
         self._current_change_index = -1
         self._changed_items = []
         
+        # Índices para busca
+        self._search_results = []
+        self._current_search_index = -1
+        self._search_dialog = None
+        self._current_search_text = ""
+        
         self.load_sound_config()
         self.setup_gui()
         self.setup_bindings()
@@ -46,6 +53,12 @@ class XMLGridView(tk.Frame):
         """Configura os atalhos de teclado"""
         self.master.bind('<Up>', lambda e: self.navigate_changes('up'))
         self.master.bind('<Down>', lambda e: self.navigate_changes('down'))
+        # Bind para Ctrl+F em Windows/Linux
+        self.master.bind('<Control-f>', lambda e: self.show_search_dialog())
+        # Bind alternativo para Ctrl+F em algumas configurações
+        self.master.bind('<Control-F>', lambda e: self.show_search_dialog())
+        # Bind para Command+F em macOS
+        self.master.bind('<Command-f>', lambda e: self.show_search_dialog())
 
     def setup_gui(self) -> None:
         """Configura os elementos da interface gráfica"""
@@ -166,7 +179,16 @@ class XMLGridView(tk.Frame):
         self.nav_frame = ttk.Frame(self.log_header)
         self.nav_frame.pack(side='right')
         
-        # Botão para navegar para cima
+        # Botão de busca
+        self.search_btn = ttk.Button(
+            self.nav_frame,
+            text="🔍 Buscar (Ctrl+F)",
+            width=18,
+            command=self.show_search_dialog
+        )
+        self.search_btn.pack(side='left', padx=2)
+        
+        # Botões de navegação
         self.up_btn = ttk.Button(
             self.nav_frame,
             text="Anterior (↑)",
@@ -176,7 +198,6 @@ class XMLGridView(tk.Frame):
         )
         self.up_btn.pack(side='left', padx=2)
         
-        # Botão para navegar para baixo
         self.down_btn = ttk.Button(
             self.nav_frame,
             text="Próxima (↓)",
@@ -199,8 +220,9 @@ class XMLGridView(tk.Frame):
         )
         self.log_area.pack(fill='x', padx=1, pady=1)
         
-        # Configura o estilo para itens alterados
+        # Configura o estilo para itens alterados e busca
         self.tree.tag_configure('changed', background='lightgreen')
+        self.tree.tag_configure('search_result', background='lightyellow')
         
     def show_settings(self) -> None:
         """Mostra a janela de configurações"""
@@ -528,3 +550,84 @@ class XMLGridView(tk.Frame):
         
         # Agenda o retorno à cor original
         self.after(500, lambda: self.tree.tag_configure('changed', background=original_bg))
+
+    def show_search_dialog(self) -> None:
+        """Mostra o diálogo de busca"""
+        if self._search_dialog is None or not self._search_dialog.winfo_exists():
+            self._search_dialog = SearchDialog(self, self.handle_search)
+    
+    def handle_search(self, search_text: str, direction: str) -> None:
+        """
+        Manipula a busca e navegação entre resultados
+        
+        Args:
+            search_text (str): Texto a ser buscado
+            direction (str): Direção da busca ('up', 'down' ou 'clear')
+        """
+        if direction == 'clear':
+            self.clear_search_results()
+            return
+            
+        # Se é uma nova busca
+        if search_text != self._current_search_text:
+            self._current_search_text = search_text
+            search_text = search_text.lower()
+            self._search_results = []
+            self._current_search_index = -1
+            
+            # Busca em todos os itens
+            for item in self.tree.get_children():
+                values = self.tree.item(item)['values']
+                if len(values) >= 2:  # Garante que tem a coluna da tag
+                    tag = str(values[1]).lower()  # Tag é a segunda coluna
+                    if search_text in tag:
+                        self._search_results.append(item)
+        
+        if not self._search_results:
+            return
+        
+        # Navega entre os resultados
+        if direction == 'up':
+            self._current_search_index -= 1
+            if self._current_search_index < 0:
+                self._current_search_index = len(self._search_results) - 1
+        else:  # down
+            self._current_search_index += 1
+            if self._current_search_index >= len(self._search_results):
+                self._current_search_index = 0
+        
+        item_id = self._search_results[self._current_search_index]
+        self.tree.see(item_id)
+        self.highlight_search_result(item_id)
+    
+    def highlight_search_result(self, item_id: str) -> None:
+        """
+        Destaca o resultado da busca mantendo outras tags
+        
+        Args:
+            item_id (str): ID do item no Treeview
+        """
+        # Remove highlight anterior
+        for item in self._search_results:
+            tags = list(self.tree.item(item)['tags'])
+            if 'search_result' in tags:
+                tags.remove('search_result')
+            self.tree.item(item, tags=tags)
+        
+        # Adiciona novo highlight mantendo outras tags
+        current_tags = list(self.tree.item(item_id)['tags'])
+        if 'search_result' not in current_tags:
+            current_tags.append('search_result')
+        self.tree.item(item_id, tags=current_tags)
+    
+    def clear_search_results(self) -> None:
+        """Limpa todos os resultados da busca"""
+        for item in self._search_results:
+            tags = list(self.tree.item(item)['tags'])
+            if 'search_result' in tags:
+                tags.remove('search_result')
+            self.tree.item(item, tags=tags)
+        
+        self._search_results = []
+        self._current_search_index = -1
+        self._current_search_text = ""
