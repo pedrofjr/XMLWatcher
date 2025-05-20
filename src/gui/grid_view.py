@@ -194,7 +194,8 @@ class XMLGridView(tk.Frame):
         self.log_area = ScrolledText(
             self.log_frame,
             height=5,
-            wrap=tk.WORD
+            wrap=tk.WORD,
+            state='disabled'  # Torna o log somente leitura
         )
         self.log_area.pack(fill='x', padx=1, pady=1)
         
@@ -462,6 +463,9 @@ class XMLGridView(tk.Frame):
         current_time = time.time()
         timestamp = datetime.now().strftime("%H:%M:%S")
         
+        # Habilita temporariamente para inserir o texto
+        self.log_area.configure(state='normal')
+        
         if processing_info and 'start_time' in processing_info:
             processing_time = current_time - processing_info['start_time']
             detection_time = processing_info.get('detection_time', timestamp)
@@ -470,6 +474,11 @@ class XMLGridView(tk.Frame):
             self.log_area.insert('end', f"[{timestamp}] {message}\n")
         
         self.log_area.see('end')
+        # Desabilita novamente para manter somente leitura
+        self.log_area.configure(state='disabled')
+        
+        # Força o foco de volta para a janela principal para permitir navegação por Tab
+        self.focus_set()
 
     def navigate_changes(self, direction: str) -> None:
         """
