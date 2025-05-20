@@ -10,6 +10,7 @@ import time
 import threading
 from .settings_dialog import SettingsDialog, DEFAULT_SETTINGS
 from .search_dialog import SearchDialog
+import sys
 
 class XMLGridView(tk.Frame):
     def __init__(self, master: tk.Tk, xml_parser: Any, xml_monitor: Any):
@@ -409,7 +410,13 @@ class XMLGridView(tk.Frame):
         """Carrega configurações de som em cache"""
         try:
             config = configparser.ConfigParser()
-            settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
+            # Usa o diretório do executável para carregar as configurações
+            if getattr(sys, 'frozen', False):
+                # Se estiver rodando como executável
+                settings_file = os.path.join(os.path.dirname(sys.executable), "settings.ini")
+            else:
+                # Se estiver rodando como script
+                settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
             
             if os.path.exists(settings_file):
                 config.read(settings_file)

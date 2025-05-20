@@ -4,6 +4,7 @@ import os
 import configparser
 import winsound
 import threading
+import sys
 
 DEFAULT_SETTINGS = {
     'Sound': {
@@ -26,7 +27,13 @@ class SettingsDialog(tk.Toplevel):
         
         # Inicializa o ConfigParser
         self.config = configparser.ConfigParser()
-        self.settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
+        # Usa o diretório do executável para salvar as configurações
+        if getattr(sys, 'frozen', False):
+            # Se estiver rodando como executável
+            self.settings_file = os.path.join(os.path.dirname(sys.executable), "settings.ini")
+        else:
+            # Se estiver rodando como script
+            self.settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
         
         # Carrega as configurações
         self.load_settings()
