@@ -169,8 +169,8 @@ class SettingsDialog(tk.Toplevel):
                 # Usa SND_ASYNC para tocar o som em segundo plano sem bloquear
                 winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
             elif frequency and duration:
-                # Para o beep, infelizmente não tem como ser assíncrono, então usamos um delay mínimo
-                winsound.Beep(frequency, min(duration, 1000))  # Limita a duração máxima do beep para 1s
+                # Limita a duração do beep para resposta mais rápida
+                winsound.Beep(frequency, min(duration, 1000))
         except Exception as e:
             # Se ocorrer algum erro, mostra uma mensagem na thread principal
             self.after(0, lambda: messagebox.showerror("Erro", f"Erro ao reproduzir som: {str(e)}"))
@@ -253,7 +253,7 @@ class SettingsDialog(tk.Toplevel):
             self.config.read(self.settings_file)
     
     def save_settings(self):
-        """Salva as configurações atuais no arquivo"""
+        """Salva as configurações atuais no arquivo e atualiza o cache"""
         # Garante que a seção Sound existe
         if not self.config.has_section('Sound'):
             self.config.add_section('Sound')
@@ -281,3 +281,7 @@ class SettingsDialog(tk.Toplevel):
         # Salva no arquivo
         with open(self.settings_file, 'w') as configfile:
             self.config.write(configfile)
+        
+        # Atualiza o cache no GridView
+        if hasattr(self.parent, 'load_sound_config'):
+            self.parent.load_sound_config()

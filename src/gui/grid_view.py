@@ -7,7 +7,8 @@ import os
 import configparser
 import winsound
 import time
-from .settings_dialog import SettingsDialog
+import threading
+from .settings_dialog import SettingsDialog, DEFAULT_SETTINGS
 
 class XMLGridView(tk.Frame):
     def __init__(self, master: tk.Tk, xml_parser: Any, xml_monitor: Any):
@@ -23,6 +24,16 @@ class XMLGridView(tk.Frame):
         self.xml_parser = xml_parser
         self.xml_monitor = xml_monitor
         self.initial_state: Dict = {}
+        
+        # Cache de configurações
+        self.sound_config = {
+            'enabled': True,
+            'frequency': 1000,
+            'duration': 100,
+            'use_custom_sound': False,
+            'custom_sound': ''
+        }
+        self.load_sound_config()
         self.setup_gui()
         
     def setup_gui(self) -> None:
@@ -313,79 +324,76 @@ class XMLGridView(tk.Frame):
                 self.start_monitoring(filename)
                 self.log_message("Monitoramento retomado")
 
-    def _should_play_sound(self) -> bool:
-        """Verifica se o som deve ser reproduzido"""
+    def load_sound_config(self):
+        """Carrega configurações de som em cache"""
         try:
-            settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
-            if os.path.exists(settings_file):
-                config = configparser.ConfigParser()
-                config.read(settings_file)
-                return config.getboolean('Sound', 'enabled')
-            else:
-                from .settings_dialog import DEFAULT_SETTINGS
-                return DEFAULT_SETTINGS['Sound']['enabled'].lower() == 'true'
-        except Exception:
-            return True
-
-    def _play_sound(self) -> None:
-        """Reproduz o som de notificação"""
-        if not self._should_play_sound():
-            return
-
-        try:
-            from .settings_dialog import DEFAULT_SETTINGS
             config = configparser.ConfigParser()
             settings_file = os.path.join(os.path.dirname(__file__), "settings.ini")
-
+            
             if os.path.exists(settings_file):
                 config.read(settings_file)
-            else:
-                # Se o arquivo não existe, usa os valores padrão
-                config.read_dict(DEFAULT_SETTINGS)
-
-            if config.getboolean('Sound', 'use_custom_sound'):
-                sound_file = config.get('Sound', 'custom_sound')
-                if sound_file and os.path.exists(sound_file):
-                    winsound.PlaySound(sound_file, winsound.SND_FILENAME)
-                    return
-
-            # Som padrão caso não use som personalizado ou em caso de erro
-            frequency = config.getint('Sound', 'frequency')
-            duration = config.getint('Sound', 'duration')
-            winsound.Beep(frequency, duration)
+                self.sound_config.update({
+                    'enabled': config.getboolean('Sound', 'enabled'),
+                    'frequency': config.getint('Sound', 'frequency'),
+                    'duration': config.getint('Sound', 'duration'),
+                    'use_custom_sound': config.getboolean('Sound', 'use_custom_sound'),
+                    'custom_sound': config.get('Sound', 'custom_sound')
+                })
         except Exception:
-            # Em caso de erro, usa o beep padrão
-            winsound.Beep(1000, 100)
+            pass  # Mantém os valores padrão em caso de erro
+
+    def _play_sound(self) -> None:
+        """Reproduz o som de notificação de forma assíncrona"""
+        if not self.sound_config['enabled']:
+            return
+
+        def play_async():
+            try:
+                if self.sound_config['use_custom_sound'] and self.sound_config['custom_sound']:
+                    if os.path.exists(self.sound_config['custom_sound']):
+                        winsound.PlaySound(
+                            self.sound_config['custom_sound'],
+                            winsound.SND_FILENAME | winsound.SND_ASYNC
+                        )
+                        return
+                
+                # Som padrão ou fallback
+                winsound.Beep(
+                    self.sound_config['frequency'],
+                    min(self.sound_config['duration'], 100)  # Limita a duração para resposta mais rápida
+                )
+            except Exception:
+                winsound.Beep(1000, 50)  # Fallback ultra-rápido em caso de erro
+
+        threading.Thread(target=play_async, daemon=True).start()
+
     def on_file_changed(self, xml_data: List[Dict[str, Any]], processing_info: Dict[str, Any] = None) -> None:
-        """
-        Callback chamado quando o arquivo é modificado
+        """Callback chamado quando o arquivo é modificado"""
+        # Toca o som imediatamente ao detectar mudança
+        self._play_sound()
         
-        Args:
-            xml_data (List[Dict]): Novos dados XML
-            processing_info (Dict): Informações sobre o processamento (tempos)
-        """
-        try:
-            data, changes = self.xml_parser.parse_file_and_get_changes(self.xml_monitor.current_file)
-            self.update_grid(data)
-            
-            # Reproduz o som se houver alterações
-            if changes:
-                self._play_sound()
-            
-            if changes:
-                for change in changes:
-                    try:
-                        message = self.xml_parser.format_change_message(change)
-                        self.log_message(message, processing_info)
-                    except Exception as e:
-                        self.log_message(f"Erro ao formatar mensagem de alteração: {str(e)}")
-                        self.log_message(f"Dados da alteração: {change}")
-        except Exception as e:
-            self.log_message(f"Erro ao processar alterações: {str(e)}")
-            if hasattr(e, '__traceback__'):
-                import traceback
-                self.log_message(f"Detalhes: {traceback.format_exc()}")
-    
+        # Processa as alterações em uma thread separada
+        def process_changes():
+            try:
+                data, changes = self.xml_parser.parse_file_and_get_changes(self.xml_monitor.current_file)
+                
+                # Atualiza a interface na thread principal
+                self.after(0, lambda: self.update_grid(data))
+                
+                if changes:
+                    for change in changes:
+                        try:
+                            message = self.xml_parser.format_change_message(change)
+                            self.after(0, lambda m=message: self.log_message(m, processing_info))
+                        except Exception as e:
+                            error_msg = str(e)
+                            self.after(0, lambda: self.log_message(f"Erro ao formatar mensagem de alteração: {error_msg}"))
+            except Exception as e:
+                error_msg = str(e)
+                self.after(0, lambda: self.log_message(f"Erro ao processar alterações: {error_msg}"))
+        
+        threading.Thread(target=process_changes, daemon=True).start()
+
     def log_message(self, message: str, processing_info: Dict[str, Any] = None) -> None:
         """
         Adiciona mensagem ao log com timestamp e tempo de processamento
