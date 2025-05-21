@@ -126,21 +126,6 @@ class XMLParser:
         for parent in root.findall('./*'):
             current_parent_number += 1
             
-            # Cache de atributos do pai
-            parent_attrs = []
-            for key, value in parent.attrib.items():
-                if '}' in key:
-                    ns_key = key.split('}')[0] + '}'
-                    if ns_key in local_ns_cache:
-                        key = local_ns_cache[ns_key] + key.split('}')[-1]
-                    else:
-                        clean_key = key.split('}')[-1]
-                        local_ns_cache[ns_key] = clean_key
-                        key = clean_key
-                parent_attrs.append(f"{key}='{value}'")
-            
-            parent_attrs_str = " ".join(parent_attrs)
-            
             # Para cada filho do elemento pai
             for child in parent:
                 # Extrai namespace com cache
@@ -159,7 +144,6 @@ class XMLParser:
                 element_data = {
                     'tag': clean_tag,
                     'value': child.text.strip() if child.text else '',
-                    'attributes': parent_attrs_str,
                     'xpath': root.getroottree().getpath(child),
                     'namespace': self._namespace_map.get(clean_tag, ''),
                     'parent_number': current_parent_number
@@ -174,30 +158,29 @@ class XMLParser:
         current_state: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Compara estados usando sets para melhor performance
+        Compara estados inicial e atual do XML, retornando lista com elementos atualizados
         
         Args:
             initial_state (List[Dict]): Estado inicial dos elementos
             current_state (List[Dict]): Estado atual dos elementos
             
         Returns:
-            List[Dict]: Lista de elementos com marcação de alterações
+            List[Dict]: Lista de elementos com informações de mudança
         """
         result = []
         changes = []
         
-        # Usa sets para comparação mais rápida
-        initial_xpaths = {elem['xpath'] for elem in initial_state}
-        current_xpaths = {elem['xpath'] for elem in current_state}
-        
-        # Identifica mudanças usando operações de set
-        added_xpaths = current_xpaths - initial_xpaths
-        removed_xpaths = initial_xpaths - current_xpaths
-        potentially_modified = initial_xpaths & current_xpaths
-        
-        # Cria mapas para lookup rápido
+        # Mapeia elementos por xpath
         initial_map = {elem['xpath']: elem for elem in initial_state}
         current_map = {elem['xpath']: elem for elem in current_state}
+        
+        # Identifica elementos modificados, adicionados e removidos
+        current_xpaths = set(current_map.keys())
+        initial_xpaths = set(initial_map.keys())
+        
+        potentially_modified = current_xpaths.intersection(initial_xpaths)
+        added_xpaths = current_xpaths - initial_xpaths
+        removed_xpaths = initial_xpaths - current_xpaths
         
         # Processa elementos modificados
         for xpath in potentially_modified:
@@ -216,20 +199,6 @@ class XMLParser:
                     'timestamp': datetime.now().strftime("%H:%M:%S")
                 })
                 changes.append(elem_data)
-            
-            # Verifica mudanças em atributos
-            if initial_elem['attributes'] != current_elem['attributes']:
-                if not elem_data.get('modified'):
-                    elem_data.update({
-                        'initial_attributes': initial_elem['attributes'],
-                        'modified': True,
-                        'attributes_changed': True,
-                        'change_type': 'attributes_changed',
-                        'old_attrs': initial_elem['attributes'],
-                        'new_attrs': current_elem['attributes'],
-                        'timestamp': datetime.now().strftime("%H:%M:%S")
-                    })
-                    changes.append(elem_data)
             
             result.append(elem_data)
         
@@ -264,8 +233,6 @@ class XMLParser:
         
         if change_type == 'modified':
             return f"Elemento <{tag}> alterado de '{change['old_value']}' para '{change['new_value']}'"
-        elif change_type == 'attributes_changed':
-            return f"Atributos do elemento <{tag}> alterados de [{change['old_attrs']}] para [{change['new_attrs']}]"
         elif change_type == 'added':
             return f"Novo elemento <{tag}> adicionado com valor '{change['value']}'"
         elif change_type == 'removed':

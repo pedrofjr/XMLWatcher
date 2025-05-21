@@ -114,7 +114,7 @@ class XMLGridView(tk.Frame):
         self.grid_frame.pack(expand=True, fill='both', padx=5, pady=5)
         
         # Treeview para mostrar os dados XML
-        columns = ('Linha', 'Tag', 'Atributos', 'Valor Original', 'Valor Atual', 'xpath')
+        columns = ('Linha', 'Tag', 'Valor Original', 'Valor Atual', 'xpath')
         self.tree = ttk.Treeview(
             self.grid_frame,
             columns=columns,
@@ -126,7 +126,6 @@ class XMLGridView(tk.Frame):
         column_widths = {
             'Linha': 60,
             'Tag': 150,
-            'Atributos': 200,
             'Valor Original': 200,
             'Valor Atual': 200,
             'xpath': 0  # Coluna oculta
@@ -311,8 +310,8 @@ class XMLGridView(tk.Frame):
             for item in self.tree.get_children():
                 try:
                     values = self.tree.item(item)['values']
-                    if len(values) >= 5:  # Garante que tem todos os valores necessários
-                        xpath = values[5] if len(values) > 5 else None  # xpath é a sexta coluna (invisível)
+                    if len(values) >= 4:  # Garante que tem todos os valores necessários
+                        xpath = values[4] if len(values) > 4 else None  # xpath é a quinta coluna (invisível)
                         if xpath:
                             current_items[xpath] = item
                 except Exception:
@@ -323,13 +322,12 @@ class XMLGridView(tk.Frame):
             for element in xml_data:
                 try:
                     tag = element['tag']
-                    attrs = str(element.get('attributes', ''))
                     original = element.get('initial_value', element.get('value', ''))
                     current = element.get('value', '')
                     parent_number = element.get('parent_number', '')
                     xpath = element.get('xpath', '')
                     
-                    values = (parent_number, tag, attrs, original, current, xpath)  # xpath como coluna oculta
+                    values = (parent_number, tag, original, current, xpath)  # xpath como coluna oculta
                     
                     # Se o item já existe, atualiza
                     if xpath in current_items:
