@@ -8,6 +8,7 @@ from queue import Queue
 class XMLParser:
     def __init__(self):
         self.initial_state = None
+        self.intermediate_state = None
         self._namespace_map = {}
         self._element_cache = {}  # Mudando para um dicionário normal
         self._cache_lock = threading.Lock()
@@ -88,12 +89,20 @@ class XMLParser:
             if self.initial_state is None:
                 with self._lock:
                     self.initial_state = current_state
+                    self.intermediate_state = None
                     with self._cache_lock:
                         self._element_cache[file_path] = current_state.copy()
                     self._last_parse_time = time.time()
                     return current_state, []
             
+            last_changes = []
+            if self.intermediate_state:
+                last_changes = self._compare_states(self.intermediate_state, current_state)
+                last_changes = [elem for elem in last_changes if elem.get('modified', False)]
+            self.intermediate_state = current_state
+
             result_data = self._compare_states(self.initial_state, current_state)
+            
             changes = [elem for elem in result_data if elem.get('modified', False)]
             
             # Atualiza cache
@@ -101,7 +110,7 @@ class XMLParser:
                 self._element_cache[file_path] = result_data.copy()
             self._last_parse_time = time.time()
             
-            return result_data, changes
+            return result_data, changes, last_changes
             
         except Exception as e:
             raise Exception(f"Erro ao parsear XML: {str(e)}")

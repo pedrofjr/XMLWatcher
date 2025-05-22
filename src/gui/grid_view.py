@@ -296,7 +296,7 @@ class XMLGridView(tk.Frame):
         except Exception as e:
             raise Exception(f"Erro ao carregar arquivo: {str(e)}")
     
-    def update_grid(self, xml_data: List[Dict[str, Any]]) -> None:
+    def update_grid(self, xml_data: List[Dict[str, Any]], last_changes: List[Dict[str, Any]] = None) -> None:
         """
         Atualiza o grid com os dados XML
         
@@ -306,7 +306,6 @@ class XMLGridView(tk.Frame):
         try:
             # Mapeia os itens atuais por xpath
             current_items = {}
-            modified_items = []
             for item in self.tree.get_children():
                 try:
                     values = self.tree.item(item)['values']
@@ -317,8 +316,12 @@ class XMLGridView(tk.Frame):
                 except Exception:
                     continue
 
-            # Atualiza ou insere itens
             last_modified_item = None
+            if last_changes:
+                xpath = last_changes[len(last_changes) - 1].get('xpath', '')
+                last_modified_item = current_items[xpath]
+            
+            # Atualiza ou insere itens
             for element in xml_data:
                 try:
                     tag = element['tag']
@@ -335,7 +338,8 @@ class XMLGridView(tk.Frame):
                         self.tree.item(item_id, values=values)
                         if element.get('modified', False):
                             self.tree.item(item_id, tags=('changed',))
-                            last_modified_item = item_id
+                            if last_modified_item is None:
+                                last_modified_item = item_id
                         else:
                             self.tree.item(item_id, tags=())
                         del current_items[xpath]  # Remove do dict para saber quais sobraram
@@ -344,7 +348,8 @@ class XMLGridView(tk.Frame):
                         item_id = self.tree.insert('', 'end', values=values)
                         if element.get('modified', False):
                             self.tree.item(item_id, tags=('changed',))
-                            last_modified_item = item_id
+                            if last_modified_item is None:
+                                last_modified_item = item_id
                     
                 except Exception as e:
                     self.log_message(f"Erro ao atualizar elemento {tag}: {str(e)}")
@@ -358,7 +363,6 @@ class XMLGridView(tk.Frame):
             
             # Se houver item modificado, rola para ele
             if last_modified_item:
-                self.tree.yview_moveto(0)  # Força o scroll para o topo primeiro
                 self.tree.see(last_modified_item)  # Rola para mostrar o item
                 
             # Atualiza estado dos botões de navegação
@@ -461,10 +465,10 @@ class XMLGridView(tk.Frame):
         # Processa as alterações em uma thread separada
         def process_changes():
             try:
-                data, changes = self.xml_parser.parse_file_and_get_changes(self.xml_monitor.current_file)
+                data, changes, last_changes = self.xml_parser.parse_file_and_get_changes(self.xml_monitor.current_file)
                 
                 # Atualiza a interface na thread principal
-                self.after(0, lambda: self.update_grid(data))
+                self.after(0, lambda: self.update_grid(data, last_changes))
                 
                 if changes:
                     for change in changes:
