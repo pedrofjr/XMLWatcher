@@ -6,6 +6,8 @@ block_cipher = None
 
 # Caminho absoluto para o ícone
 icon_path = os.path.abspath(os.path.join('src', 'resources', 'icone.ico'))
+# Caminho absoluto para o arquivo de versão
+version_file = os.path.abspath('file_version_info.txt')
 
 a = Analysis(
     ['src/main.py'],
@@ -52,5 +54,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_path  # Usa o caminho absoluto do ícone
+    icon=icon_path,  # Usa o caminho absoluto do ícone
+    version=version_file  # Adiciona as informações de versão
 )
