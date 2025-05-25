@@ -251,17 +251,53 @@ class XMLGridView(tk.Frame):
         """Redefine o estado atual como o estado inicial"""
         if self.xml_monitor.current_file:
             try:
-                # Recarrega o XML atual como estado inicial
+                # Limpa o grid
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
+                
+                # Atualiza a interface
+                self.update_idletasks()
+                
+                # Reseta completamente o estado do parser
                 self.xml_parser.initial_state = None
+                self.xml_parser.intermediate_state = None
+                
+                # Limpa o cache do parser
+                with self.xml_parser._cache_lock:
+                    self.xml_parser._element_cache = {}
+                
+                # Reseta variáveis de interface
+                self._current_change_index = -1
+                self._changed_items = []
+                self._search_results = []
+                self._current_search_index = -1
+                
+                # Recarrega o XML atual como estado inicial
                 xml_data = self.xml_parser.parse_file(self.xml_monitor.current_file)
                 self.initial_state = xml_data
-                self.update_grid(xml_data)
+                
+                # Atualiza a interface de forma assíncrona
+                self.after(10, lambda: self.update_grid(xml_data))
+                
+                # Limpa o log
+                self.log_area.configure(state='normal')
+                self.log_area.delete(1.0, tk.END)
+                self.log_area.configure(state='disabled')
+                
+                # Loga a mensagem
                 self.log_message("Estado redefinido com sucesso")
+                
             except Exception as e:
                 self.log_message(f"Erro ao redefinir estado: {str(e)}")
+                # Tenta recuperar o estado
+                self.xml_parser.initial_state = None
     
     def select_file(self) -> None:
         """Abre diálogo para selecionar arquivo XML"""
+        # Pára o monitoramento atual se houver
+        if self.xml_monitor and self.xml_monitor.is_monitoring():
+            self.xml_monitor.stop_monitoring()
+        
         filename = filedialog.askopenfilename(
             title="Selecione um arquivo XML",
             filetypes=[
@@ -272,14 +308,41 @@ class XMLGridView(tk.Frame):
         
         if filename:
             try:
-                self.xml_parser.initial_state = None  # Reseta o estado inicial
+                # Limpa completamente a grid antes de iniciar
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
+                
+                # Reset completo do estado
+                self.xml_parser.initial_state = None
+                self.xml_parser.intermediate_state = None
+                self._current_change_index = -1
+                self._changed_items = []
+                self._search_results = []
+                self._current_search_index = -1
+                
+                # Atualiza a interface
+                self.update_idletasks()
+                
+                # Carrega o novo arquivo
                 self.load_xml(filename)
                 self.start_monitoring(filename)
                 self.file_label.config(text=filename)
                 self.monitor_btn.config(state='normal')
                 self.reset_btn.config(state='normal')
+                
+                # Limpa o log
+                self.log_area.configure(state='normal')
+                self.log_area.delete(1.0, tk.END)
+                self.log_area.configure(state='disabled')
+                
+                # Loga a mensagem de carregamento
+                self.log_message(f"Arquivo carregado: {os.path.basename(filename)}")
+                
             except Exception as e:
                 self.log_message(f"Erro ao abrir arquivo: {str(e)}")
+                # Em caso de erro, tenta restaurar um estado limpo
+                self.xml_parser.initial_state = None
+                self.xml_parser.intermediate_state = None
     
     def load_xml(self, filename: str) -> None:
         """
@@ -289,62 +352,94 @@ class XMLGridView(tk.Frame):
             filename (str): Caminho do arquivo XML
         """
         try:
+            # Limpa o cache do parser
+            with self.xml_parser._cache_lock:
+                self.xml_parser._element_cache = {}
+            
+            # Reseta o estado do parser
+            self.xml_parser._last_parse_time = 0
+            
+            # Carrega o arquivo
             xml_data = self.xml_parser.parse_file(filename)
             self.initial_state = xml_data
-            self.update_grid(xml_data)
-            self.log_message(f"Arquivo carregado: {os.path.basename(filename)}")
+            
+            # Atualiza a interface em um processo separado
+            self.after(10, lambda: self.update_grid(xml_data))
+            
         except Exception as e:
+            # Limpa o estado em caso de erro
+            self.xml_parser.initial_state = None
+            self.xml_parser.intermediate_state = None
+            
+            # Limpa a grid
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+                
+            # Atualiza a interface
+            self.update_idletasks()
+            
+            # Loga o erro
             raise Exception(f"Erro ao carregar arquivo: {str(e)}")
     
     def update_grid(self, xml_data: List[Dict[str, Any]], last_changes: List[Dict[str, Any]] = None) -> None:
         """
-        Atualiza o grid com os dados XML
+        Atualiza o grid com os dados XML de forma incremental
         
         Args:
             xml_data (List[Dict]): Lista de elementos XML
+            last_changes (List[Dict]): Lista das últimas alterações
         """
         try:
-            # Mapeia os itens atuais por xpath
+            # MANTÉM itens existentes - NÃO limpa tudo
             current_items = {}
             for item in self.tree.get_children():
                 try:
                     values = self.tree.item(item)['values']
-                    if len(values) >= 4:  # Garante que tem todos os valores necessários
-                        xpath = values[4] if len(values) > 4 else None  # xpath é a quinta coluna (invisível)
-                        if xpath:
-                            current_items[xpath] = item
+                    if len(values) >= 5:
+                        xpath = values[4]  # xpath é a quinta coluna
+                        current_items[xpath] = item
                 except Exception:
                     continue
 
             last_modified_item = None
-            if last_changes:
-                xpath = last_changes[len(last_changes) - 1].get('xpath', '')
-                last_modified_item = current_items[xpath]
+            if last_changes and len(last_changes) > 0:
+                xpath = last_changes[-1].get('xpath', '')
+                # Busca o item existente pelo xpath
+                last_modified_item = current_items.get(xpath)
             
             # Atualiza ou insere itens
             for element in xml_data:
                 try:
-                    tag = element['tag']
+                    tag = element.get('tag', '')
                     original = element.get('initial_value', element.get('value', ''))
                     current = element.get('value', '')
                     parent_number = element.get('parent_number', '')
                     xpath = element.get('xpath', '')
                     
-                    values = (parent_number, tag, original, current, xpath)  # xpath como coluna oculta
+                    # Formata o valor para visualização
+                    if len(current) > 500:
+                        current = current[:497] + '...'
+                    if len(original) > 500:
+                        original = original[:497] + '...'
                     
-                    # Se o item já existe, atualiza
+                    values = (parent_number, tag, original, current, xpath)
+                    
+                    # Se o item já existe, ATUALIZA
                     if xpath in current_items:
                         item_id = current_items[xpath]
                         self.tree.item(item_id, values=values)
+                        
                         if element.get('modified', False):
                             self.tree.item(item_id, tags=('changed',))
                             if last_modified_item is None:
                                 last_modified_item = item_id
                         else:
                             self.tree.item(item_id, tags=())
-                        del current_items[xpath]  # Remove do dict para saber quais sobraram
+                        
+                        # Remove do dict para saber quais sobraram
+                        del current_items[xpath]
                     else:
-                        # Se não existe, insere novo
+                        # Se não existe, INSERE novo
                         item_id = self.tree.insert('', 'end', values=values)
                         if element.get('modified', False):
                             self.tree.item(item_id, tags=('changed',))
@@ -361,18 +456,23 @@ class XMLGridView(tk.Frame):
                 except Exception:
                     continue
             
-            # Se houver item modificado, rola para ele
+            # SCROLL FUNCIONA - item_id é preservado
             if last_modified_item:
-                self.tree.see(last_modified_item)  # Rola para mostrar o item
+                self.tree.see(last_modified_item)
+                
+            # Atualiza lista de itens alterados para navegação
+            self._changed_items = [
+                item for item in self.tree.get_children()
+                if 'changed' in self.tree.item(item)['tags']
+            ]
                 
             # Atualiza estado dos botões de navegação
-            has_changes = any(element.get('modified', False) for element in xml_data)
+            has_changes = len(self._changed_items) > 0
             self.up_btn.configure(state='normal' if has_changes else 'disabled')
             self.down_btn.configure(state='normal' if has_changes else 'disabled')
             
             # Reseta o índice de navegação quando o grid é atualizado
             self._current_change_index = -1
-            self._changed_items = []
             
         except Exception as e:
             self.log_message(f"Erro ao atualizar grid: {str(e)}")
@@ -387,15 +487,27 @@ class XMLGridView(tk.Frame):
         Args:
             filename (str): Caminho do arquivo a ser monitorado
         """
-        self.xml_monitor.start_monitoring(
-            filename,
-            callback=self.on_file_changed
-        )
-        self.monitor_btn.config(
-            text="Pausar Monitoramento",
-            state='normal'
-        )
+        # Para qualquer monitoramento anterior
+        if self.xml_monitor.is_monitoring():
+            self.xml_monitor.stop_monitoring()
+        
+        # Aguarda um momento para garantir que o monitoramento anterior foi interrompido
+        self.after(100, lambda: self._actually_start_monitoring(filename))
     
+    def _actually_start_monitoring(self, filename: str) -> None:
+        """Método interno para iniciar o monitoramento após delay"""
+        try:
+            self.xml_monitor.start_monitoring(
+                filename,
+                callback=self.on_file_changed
+            )
+            self.monitor_btn.config(
+                text="Pausar Monitoramento",
+                state='normal'
+            )
+        except Exception as e:
+            self.log_message(f"Erro ao iniciar monitoramento: {str(e)}")
+
     def toggle_monitoring(self) -> None:
         """Alterna entre pausar e retomar o monitoramento"""
         if self.xml_monitor.is_monitoring():
@@ -514,36 +626,43 @@ class XMLGridView(tk.Frame):
 
     def navigate_changes(self, direction: str) -> None:
         """
-        Navega entre os itens alterados
+        Navega entre as alterações no XML
         
         Args:
             direction (str): Direção da navegação ('up' ou 'down')
         """
-        # Atualiza lista de itens alterados
-        self._changed_items = [
-            item for item in self.tree.get_children()
-            if 'changed' in self.tree.item(item)['tags']
-        ]
-        
+        # Se não houver alterações, retorna
         if not self._changed_items:
             return
-        
-        # Ajusta o índice baseado na direção
+            
+        # Atualiza o índice de mudança atual com base na direção
         if direction == 'up':
-            self._current_change_index -= 1
-            if self._current_change_index < 0:
-                self._current_change_index = len(self._changed_items) - 1
+            self._current_change_index = (self._current_change_index - 1) % len(self._changed_items)
         else:  # down
-            self._current_change_index += 1
-            if self._current_change_index >= len(self._changed_items):
-                self._current_change_index = 0
+            self._current_change_index = (self._current_change_index + 1) % len(self._changed_items)
+            
+        # Obtém o ID do item para o índice atual
+        current_item = self._changed_items[self._current_change_index]
         
-        # Seleciona e mostra o item
-        item_id = self._changed_items[self._current_change_index]
-        self.tree.see(item_id)
+        # Rola para exibir o item
+        self.tree.see(current_item)
         
-        # Destaca brevemente o item
-        self.flash_item(item_id)
+        # Destaca o item visualmente
+        self.flash_item(current_item)
+        
+        # Mostra mensagem de navegação no log
+        try:
+            item_data = self.tree.item(current_item, 'values')
+            line_number = item_data[0] if len(item_data) > 0 else "?"
+            tag = item_data[1] if len(item_data) > 1 else "?"
+            value = item_data[3] if len(item_data) > 3 else "?"
+            
+            self.log_message(
+                f"Navegando para mudança {self._current_change_index + 1} de {len(self._changed_items)}: "
+                f"Linha {line_number}, tag <{tag}>, valor: '{value}'"
+            )
+        except Exception as e:
+            self.log_message(f"Erro ao navegar: {str(e)}")
     
     def flash_item(self, item_id: str) -> None:
         """

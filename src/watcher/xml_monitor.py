@@ -126,7 +126,8 @@ class XMLFileHandler(FileSystemEventHandler):
         Returns:
             str: Conteúdo do arquivo
         """
-        encodings = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+        # Lista de codificações a tentar, com UTF-16LE no início para arquivos que sabemos que têm esta codificação
+        encodings = ['utf-16le', 'utf-16', 'utf-8', 'latin1', 'cp1252', 'iso-8859-1']
         last_error = None
         
         for attempt in range(max_retries):
@@ -134,14 +135,29 @@ class XMLFileHandler(FileSystemEventHandler):
             time.sleep(initial_delay * (2 ** attempt))
             
             try:
-                # Primeiro tenta ler em modo binário
+                # Primeiro tenta ler os primeiros bytes para detectar BOM
                 with open(self.file_path, 'rb') as f:
-                    content = f.read()
-                    
-                # Tenta diferentes encodings
+                    header = f.read(4)
+                
+                # Detecta BOM para UTF-16
+                if header.startswith(b'\xff\xfe'):
+                    # UTF-16LE detectado
+                    with open(self.file_path, 'r', encoding='utf-16le') as f:
+                        return f.read()
+                elif header.startswith(b'\xfe\xff'):
+                    # UTF-16BE detectado
+                    with open(self.file_path, 'r', encoding='utf-16be') as f:
+                        return f.read()
+                elif header.startswith(b'\xef\xbb\xbf'):
+                    # UTF-8 com BOM
+                    with open(self.file_path, 'r', encoding='utf-8-sig') as f:
+                        return f.read()
+                
+                # Se não foi detectado BOM, tenta as codificações na ordem
                 for encoding in encodings:
                     try:
-                        return content.decode(encoding)
+                        with open(self.file_path, 'r', encoding=encoding) as f:
+                            return f.read()
                     except UnicodeDecodeError:
                         continue
                     except Exception as e:
@@ -230,8 +246,23 @@ class XMLFileMonitor:
         """Para o monitoramento do arquivo"""
         with self._lock:
             if self.observer:
-                self.observer.stop()
-                self.observer.join()
+                try:
+                    self.observer.stop()
+                    # Define um timeout para evitar bloqueios
+                    self.observer.join(timeout=0.5)
+                    
+                    # Se o observer ainda estiver vivo, force o encerramento
+                    if self.observer.is_alive():
+                        # Em um ambiente de produção, poderíamos logar isso
+                        pass
+                        
+                except Exception:
+                    # Ignora erros ao parar o observer
+                    pass
+                
+                # Limpa as referências
+                self.observer = None
+                self.handler = None
                 self._is_monitoring = False
                 self._current_file = None
 
